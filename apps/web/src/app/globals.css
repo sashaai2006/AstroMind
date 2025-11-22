@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Typography */
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Cosmic Palette - Deep & Expensive */
+  --color-bg-deep: #030014;      /* Deepest void */
+  --color-bg-nebula: #0f0728;    /* Purple haze */
+  
+  /* Accents - Neon but refined */
+  --color-primary: #6366f1;      /* Indigo 500 */
+  --color-primary-glow: rgba(99, 102, 241, 0.5);
+  
+  --color-secondary: #a855f7;    /* Purple 500 */
+  --color-secondary-glow: rgba(168, 85, 247, 0.5);
+
+  --color-accent: #06b6d4;       /* Cyan 500 */
+  --color-accent-glow: rgba(6, 182, 212, 0.5);
+
+  --color-success: #10b981;      /* Emerald 500 */
+  --color-warning: #f59e0b;      /* Amber 500 */
+  --color-error: #ef4444;        /* Red 500 */
+
+  /* Glass System */
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-surface: rgba(255, 255, 255, 0.03);
+  --glass-highlight: rgba(255, 255, 255, 0.05);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+@layer base {
+  html {
+    font-family: var(--font-body);
+    background-color: var(--color-bg-deep);
+    color: #e2e8f0; /* Slate 200 */
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Cosmic Background System */
+.bg-cosmic {
+  background-color: var(--color-bg-deep);
+  background-image: 
+    radial-gradient(circle at 15% 50%, rgba(76, 29, 149, 0.15), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(56, 189, 248, 0.1), transparent 25%);
+  background-attachment: fixed;
+}
+
+/* The "Expensive Glass" Utility */
+.glass-panel {
+  background: var(--glass-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+.glass-panel-hover {
+  transition: all 0.3s ease;
+}
+.glass-panel-hover:hover {
+  background: var(--glass-highlight);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.15); /* Subtle glow on hover */
+}
+
+/* Neon Text & Borders */
+.text-glow {
+  text-shadow: 0 0 10px var(--color-primary-glow);
+}
+
+.border-glow {
+  box-shadow: 0 0 10px var(--color-primary-glow), inset 0 0 5px var(--color-primary-glow);
+}
+
+/* Animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; box-shadow: 0 0 15px var(--color-primary-glow); }
+  50% { opacity: 1; box-shadow: 0 0 25px var(--color-primary-glow); }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 3s infinite;
+}
+
+@keyframes gradient-x {
+  0%, 100% {
+    background-size: 200% 200%;
+    background-position: left center;
+  }
+  50% {
+    background-size: 200% 200%;
+    background-position: right center;
+  }
+}
+.animate-gradient {
+  animation: gradient-x 15s ease infinite;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

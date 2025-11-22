@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # --- Data Layer ---
+  
+  # Graph Database
+  memgraph:
+    image: memgraph/memgraph-platform:latest
+    container_name: gangai-memgraph
+    ports:
+      - "7687:7687"   # Bolt port
+      - "3001:3000"   # Memgraph Lab (Visual UI) -> Moved to 3001 to avoid conflict with Next.js
+      - "7444:7444"   # Logs
+    environment:
+      - MEMGRAPH_USER=gangai
+      - MEMGRAPH_PASSWORD=gangai_secret
+    volumes:
+      - memgraph_data:/var/lib/memgraph
+      - memgraph_log:/var/log/memgraph
+
+  # Object Storage (S3 compatible)
+  minio:
+    image: minio/minio:latest
+    container_name: gangai-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000" # API
+      - "9001:9001" # Console UI
+    environment:
+      - MINIO_ROOT_USER=gangai_admin
+      - MINIO_ROOT_PASSWORD=gangai_secret_key
+    volumes:
+      - minio_data:/data
+
+  # --- Application Layer ---
+
+  # Python Backend (AI Brain)
+  backend:
+    build: 
+      context: ./apps/backend
+    container_name: gangai-backend
+    volumes:
+      - ./apps/backend/src:/app/src
+      - /var/run/docker.sock:/var/run/docker.sock # ALLOW DOCKER CONTROL
+    ports:
+      - "8000:8000"
+    environment:
+      - MEMGRAPH_URI=bolt://memgraph:7687
+      - MEMGRAPH_USER=gangai
+      - MEMGRAPH_PASSWORD=gangai_secret
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=gangai_admin
+      - MINIO_SECRET_KEY=gangai_secret_key
+      - MAIN_LLM_PROVIDER=${MAIN_LLM_PROVIDER}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    depends_on:
+      - memgraph
+      - minio
+
+volumes:
+  memgraph_data:
+  memgraph_log:
+  minio_data:
