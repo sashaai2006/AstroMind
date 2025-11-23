@@ -2,13 +2,15 @@
 
 import { Layers, CheckCircle2, Circle, Loader2, ArrowDown } from "lucide-react";
 import { Task } from "@/hooks/useProjectSocket";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Props = {
   tasks: Task[];
   progress: number;
+  isLoading?: boolean;
 };
 
-export function PlanTimeline({ tasks, progress }: Props) {
+export function PlanTimeline({ tasks, progress, isLoading }: Props) {
   return (
     <div className="glass-panel rounded-3xl p-5 shadow-2xl flex flex-col flex-1 overflow-hidden relative">
       <div className="flex items-center justify-between mb-6 z-10">
@@ -35,7 +37,16 @@ export function PlanTimeline({ tasks, progress }: Props) {
         {/* Connecting Line */}
         <div className="absolute left-[11px] top-2 bottom-2 w-px bg-gradient-to-b from-indigo-500/50 via-slate-800 to-transparent" />
         
-        {tasks.length === 0 ? (
+        {isLoading ? (
+           <div className="space-y-6 pl-8 pt-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="relative">
+                       <Skeleton className="absolute -left-7 top-1 w-3.5 h-3.5 rounded-full" />
+                       <Skeleton className="h-16 w-full rounded-xl" />
+                  </div>
+              ))}
+           </div>
+        ) : tasks.length === 0 ? (
             <div className="text-center py-10 text-slate-600 text-xs font-mono">
                 AWAITING MISSION PARAMETERS
             </div>

@@ -9,16 +9,46 @@ const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
   loading: () => <div className="text-slate-500 text-sm animate-pulse">Initializing Neural Network...</div>
 });
 
+type GraphAPI = {
+  zoomToFit: () => void;
+  focusOnNode: (id?: string) => void;
+};
+
 type NetworkGraphProps = {
   projectId: string;
   agents: Agent[];
   tasks: Task[];
   files: FileArtifact[];
+  onAgentSelect?: (agent: Agent) => void;
+  onInit?: (api: GraphAPI) => void;
 };
 
-export default function NetworkGraph({ projectId, agents, tasks, files }: NetworkGraphProps) {
-  const [data, setData] = useState({ nodes: [], links: [] });
+type GraphData = { nodes: any[]; links: any[] };
+
+export default function NetworkGraph({ projectId, agents, tasks, files, onAgentSelect, onInit }: NetworkGraphProps) {
+  const [data, setData] = useState<GraphData>({ nodes: [], links: [] });
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const fgRef = useRef<any>();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const dataRef = useRef<GraphData>({ nodes: [], links: [] });
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const resizeObserver = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setDimensions({
+          width: Math.max(width, 400),
+          height: Math.max(height, 400),
+        });
+      }
+    });
+
+    resizeObserver.observe(element);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   // Theme Colors
   const colors = {
@@ -91,7 +121,8 @@ export default function NetworkGraph({ projectId, agents, tasks, files }: Networ
           label: agent.role, 
           group: 'agent', 
           color: colors.agent, 
-          val: 20 
+          val: 20,
+          agentData: agent // Store full agent data
       });
       links.push({ source: 'project', target: agent.role, color: colors.link }); 
     });
@@ -139,16 +170,36 @@ export default function NetworkGraph({ projectId, agents, tasks, files }: Networ
         }
     });
 
-    setData({ nodes, links });
-
+    const graphData = { nodes, links };
+    dataRef.current = graphData;
+    setData(graphData);
   }, [projectId, agents, tasks, files]);
 
+  useEffect(() => {
+    if (!onInit || !fgRef.current) return;
+    const api: GraphAPI = {
+      zoomToFit: () => fgRef.current?.zoomToFit(400, 80),
+      focusOnNode: (id) => {
+        if (!id) {
+          fgRef.current?.zoomToFit(400, 80);
+          return;
+        }
+        const node = dataRef.current.nodes.find((n) => n.id === id);
+        if (node) {
+          fgRef.current?.centerAt(node.x ?? 0, node.y ?? 0, 600);
+          fgRef.current?.zoom(2, 600);
+        }
+      }
+    };
+    onInit(api);
+  }, [onInit]);
+
   return (
-    <div className="w-full h-full relative overflow-hidden">
+    <div ref={containerRef} className="w-full h-full relative overflow-hidden">
         <ForceGraph2D
             ref={fgRef}
-            width={800} 
-            height={600}
+            width={dimensions.width}
+            height={dimensions.height}
             graphData={data}
             
             // Physics
@@ -159,6 +210,16 @@ export default function NetworkGraph({ projectId, agents, tasks, files }: Networ
             
             // Rendering
             nodeCanvasObject={paintNode}
+            
+            // Interactions
+            onNodeClick={(node: any) => {
+                if (node.group === 'agent' && onAgentSelect) {
+                    onAgentSelect(node.agentData);
+                    // Focus camera on agent
+                    fgRef.current?.centerAt(node.x, node.y, 1000);
+                    fgRef.current?.zoom(2, 1000);
+                }
+            }}
             
             // Links
             linkColor={(link: any) => link.color}
@@ -172,8 +233,24 @@ export default function NetworkGraph({ projectId, agents, tasks, files }: Networ
             backgroundColor="rgba(0,0,0,0)" 
         />
         
+        {/* Stats */}
+        <div className="absolute top-4 left-4 glass-panel rounded-xl border border-white/10 px-4 py-3 text-xs uppercase tracking-widest text-slate-400 pointer-events-none flex gap-6">
+            <div className="flex flex-col">
+                <span className="text-[10px] text-slate-500">Agents</span>
+                <span className="text-base font-semibold text-white">{agents.length}</span>
+            </div>
+            <div className="flex flex-col">
+                <span className="text-[10px] text-slate-500">Tasks</span>
+                <span className="text-base font-semibold text-white">{tasks.length}</span>
+            </div>
+            <div className="flex flex-col">
+                <span className="text-[10px] text-slate-500">Artifacts</span>
+                <span className="text-base font-semibold text-white">{files.length}</span>
+            </div>
+        </div>
+
         {/* Legend */}
-        <div className="absolute top-4 right-4 text-[10px] font-mono glass-panel p-3 rounded-xl border border-white/10 backdrop-blur-md">
+        <div className="absolute top-4 right-4 text-[10px] font-mono glass-panel p-3 rounded-xl border border-white/10 backdrop-blur-md pointer-events-none">
             <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full" style={{backgroundColor: colors.nexus, boxShadow: `0 0 10px ${colors.nexus}`}}></span> NEXUS CORE</div>
             <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full" style={{backgroundColor: colors.agent, boxShadow: `0 0 10px ${colors.agent}`}}></span> AGENTS</div>
             <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full" style={{backgroundColor: colors.taskActive, boxShadow: `0 0 10px ${colors.taskActive}`}}></span> ACTIVE TASK</div>

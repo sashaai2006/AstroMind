@@ -20,9 +20,9 @@ export function Navbar({ showDashboard, isConnected, viewMode, onViewChange, onL
         </div>
         <div className="flex flex-col">
           <span className="font-bold text-lg tracking-tight text-white leading-none">
-            HIVE <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">PROTOCOL</span>
+            ASTRA <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">MIND</span>
           </span>
-          <span className="text-[10px] text-slate-400 uppercase tracking-widest">Autonomous Swarm</span>
+          <span className="text-[10px] text-slate-400 uppercase tracking-widest">Intelligence Swarm</span>
         </div>
       </div>
 

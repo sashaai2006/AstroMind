@@ -1,10 +1,16 @@
 "use client";
 
 import Editor from "@monaco-editor/react";
-import { FileCode, Loader2, Download, Code2, FileJson, Maximize2, RefreshCw } from "lucide-react";
-import { useMemo } from "react";
+import { FileCode, Loader2, Download, Code2, FileJson, Compass } from "lucide-react";
+import { useMemo, useState, useRef } from "react";
 import { FileArtifact, Task, Agent } from "@/hooks/useProjectSocket";
 import NetworkGraph from "@/components/NetworkGraph";
+import { AgentInspector } from "@/components/dashboard/AgentInspector";
+
+type GraphApi = {
+  zoomToFit: () => void;
+  focusOnNode: (id?: string) => void;
+};
 
 type Props = {
   viewMode: "code" | "graph";
@@ -15,6 +21,8 @@ type Props = {
   projectId: string;
   agents: Agent[];
   tasks: Task[];
+  graphFocus?: boolean;
+  onExitGraph?: () => void;
 };
 
 export function Viewport({
@@ -26,7 +34,15 @@ export function Viewport({
   projectId,
   agents,
   tasks,
+  graphFocus = false,
+  onExitGraph,
 }: Props) {
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const graphApiRef = useRef<GraphApi | null>(null);
+
+  const activeTasks = useMemo(() => tasks.filter((t) => t.status === "in_progress").length, [tasks]);
+  const pendingTasks = useMemo(() => tasks.filter((t) => t.status === "pending").length, [tasks]);
+
   const editorLanguage = useMemo(() => {
     if (!activeFile) return "python";
     if (activeFile.name.endsWith(".html")) return "html";
@@ -36,8 +52,12 @@ export function Viewport({
     return "python";
   }, [activeFile]);
 
+  const containerBase = graphFocus && viewMode === "graph"
+    ? "flex-1 flex flex-col h-full w-full relative"
+    : "glass-panel rounded-3xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col relative h-full w-full border-none ring-1 ring-white/10";
+
   return (
-    <div className="glass-panel rounded-3xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col relative h-full w-full border-none ring-1 ring-white/10">
+    <div className={containerBase}>
       {/* Viewport Header/Tabs */}
       {viewMode === "code" && (
         <div className="h-12 bg-[#0a0a12]/80 backdrop-blur-xl border-b border-white/5 flex items-center px-2 gap-1 overflow-x-auto no-scrollbar z-20">
@@ -91,7 +111,7 @@ export function Viewport({
       )}
 
       {/* Content Area */}
-      <div className="flex-1 relative bg-[#05050a]">
+      <div className={`flex-1 relative ${graphFocus && viewMode === "graph" ? "bg-transparent" : "bg-[#05050a]"}`}>
         {viewMode === "code" ? (
           activeFile ? (
             <Editor
@@ -148,10 +168,69 @@ export function Viewport({
             </div>
           )
         ) : (
-          <div className="w-full h-full bg-[url('/grid.svg')] bg-[length:40px_40px] opacity-80 relative">
-              {/* Subtle overlay for depth */}
-              <div className="absolute inset-0 bg-radial-gradient from-transparent to-[#05050a] pointer-events-none" />
-              <NetworkGraph projectId={projectId} agents={agents} tasks={tasks} files={files} />
+          <div className={`w-full h-full ${graphFocus ? "bg-gradient-to-br from-[#020617] via-[#04021a] to-[#01000f]" : "bg-[url('/grid.svg')] bg-[length:40px_40px] opacity-80"} relative`}>
+              {!graphFocus && (
+                <div className="absolute inset-0 bg-radial-gradient from-transparent to-[#05050a] pointer-events-none" />
+              )}
+              
+              <NetworkGraph 
+                 projectId={projectId} 
+                 agents={agents} 
+                 tasks={tasks} 
+                 files={files} 
+                 onAgentSelect={(agent) => setSelectedAgent(agent)}
+                 onInit={(api) => { graphApiRef.current = api; }}
+              />
+
+              {graphFocus && onExitGraph && (
+                <div className="absolute top-6 right-6 z-30">
+                    <button
+                      onClick={onExitGraph}
+                      className="px-4 py-2 rounded-full bg-white text-black text-xs font-semibold uppercase tracking-wide shadow-lg hover:bg-slate-200 transition"
+                    >
+                      Exit Graph
+                    </button>
+                </div>
+              )}
+
+              {selectedAgent && (
+                 <AgentInspector agent={selectedAgent} onClose={() => setSelectedAgent(null)} />
+              )}
+
+              {graphFocus && (
+                <>
+                  <div className="absolute top-6 left-6 z-30 glass-panel rounded-2xl border border-white/10 px-6 py-4 backdrop-blur-xl">
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-slate-500">Mission Status</p>
+                    <div className="mt-2 flex gap-6 text-sm font-semibold">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] text-slate-500">Agents</span>
+                        <span className="text-xl text-white">{agents.length}</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] text-slate-500">Active Tasks</span>
+                        <span className="text-xl text-amber-300">{activeTasks}</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] text-slate-500">Artifacts</span>
+                        <span className="text-xl text-cyan-300">{files.length}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-4 z-30">
+                    <button
+                      onClick={() => graphApiRef.current?.zoomToFit()}
+                      className="px-6 py-3 rounded-full bg-white text-black text-xs font-semibold uppercase tracking-widest shadow-[0_0_25px_rgba(255,255,255,0.4)] hover:bg-slate-100 transition flex items-center gap-2"
+                    >
+                      <Compass className="w-4 h-4" />
+                      Re-center Graph
+                    </button>
+                    <div className="glass-panel rounded-2xl border border-white/10 px-4 py-3 text-xs uppercase tracking-widest text-slate-400">
+                      Pending: <span className="text-white">{pendingTasks}</span>
+                    </div>
+                  </div>
+                </>
+              )}
           </div>
         )}
       </div>

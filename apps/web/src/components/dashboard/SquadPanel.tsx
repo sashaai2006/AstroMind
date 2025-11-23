@@ -2,12 +2,14 @@
 
 import { User, Bot, Sparkles, Zap } from "lucide-react";
 import { Agent } from "@/hooks/useProjectSocket";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Props = {
   agents: Agent[];
+  isLoading?: boolean;
 };
 
-export function SquadPanel({ agents }: Props) {
+export function SquadPanel({ agents, isLoading }: Props) {
   return (
     <div className="glass-panel rounded-3xl p-5 shadow-2xl flex flex-col min-h-[30%] relative overflow-hidden">
       {/* Background Decor */}
@@ -20,7 +22,18 @@ export function SquadPanel({ agents }: Props) {
       </h2>
 
       <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar flex-1 relative z-10">
-        {agents.length === 0 ? (
+        {isLoading ? (
+          // Skeletons
+          Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-white/5 border border-white/5">
+               <Skeleton className="w-10 h-10 rounded-lg" />
+               <div className="flex-1 space-y-2">
+                  <Skeleton className="h-3 w-24" />
+                  <Skeleton className="h-2 w-16" />
+               </div>
+            </div>
+          ))
+        ) : agents.length === 0 ? (
              <div className="text-center py-10 text-slate-600 text-xs font-mono border border-dashed border-slate-800 rounded-xl">
                 NO ACTIVE AGENTS
              </div>

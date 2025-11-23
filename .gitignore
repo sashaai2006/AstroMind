@@ -14,3 +14,16 @@ out/
 *.pyc
 .pytest_cache/
 
+# IDE & Editor
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+dist/
+build/
+*.log
+

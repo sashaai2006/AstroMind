@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Terminal as TerminalIcon, X, Maximize2, Minimize2, Activity } from "lucide-react";
 
 type Props = {
   logs: string[];
-  isOpen: boolean;
   showTerminal: boolean;
   setShowTerminal: (show: boolean) => void;
   logsEndRef: React.RefObject<HTMLDivElement>;

@@ -14,9 +14,10 @@ type SidebarProps = {
   onToggleTerminal: () => void;
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  hasUnreadLogs?: boolean;
 };
 
-export function Sidebar({ activeTab, setActiveTab, onToggleTerminal, sidebarOpen, setSidebarOpen }: SidebarProps) {
+export function Sidebar({ activeTab, setActiveTab, onToggleTerminal, sidebarOpen, setSidebarOpen, hasUnreadLogs }: SidebarProps) {
   return (
     <aside className={`flex flex-col items-center py-6 border-r border-white/10 glass-panel transition-all duration-300 z-50 relative ${
         sidebarOpen ? "w-20" : "w-0 -translate-x-full opacity-0 overflow-hidden"
@@ -51,6 +52,7 @@ export function Sidebar({ activeTab, setActiveTab, onToggleTerminal, sidebarOpen
           active={false} 
           onClick={onToggleTerminal} 
           isAction
+          badge={hasUnreadLogs}
         />
         <NavIcon 
           icon={<Settings />} 
@@ -63,7 +65,7 @@ export function Sidebar({ activeTab, setActiveTab, onToggleTerminal, sidebarOpen
   );
 }
 
-function NavIcon({ icon, label, active, onClick, isAction }: any) {
+function NavIcon({ icon, label, active, onClick, isAction, badge }: any) {
   return (
     <button
       onClick={onClick}
@@ -77,6 +79,11 @@ function NavIcon({ icon, label, active, onClick, isAction }: any) {
       <div className="relative z-10 transform group-hover:scale-110 transition-transform">
         {icon}
       </div>
+      
+      {/* Badge for unread logs */}
+      {badge && (
+          <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 border border-black animate-pulse z-20" />
+      )}
       
       {/* Active Indicator */}
       {active && (

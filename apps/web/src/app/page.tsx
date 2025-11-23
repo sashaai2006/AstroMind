@@ -27,10 +27,25 @@ export default function Home() {
   const [showTerminal, setShowTerminal] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [hasUnreadLogs, setHasUnreadLogs] = useState(false);
   
   // Data State
-  const { isConnected, logs, agents, tasks, files, activeFile, setActiveFile } = useProjectSocket(projectId);
+  const { isConnected, logs, agents, tasks, files, activeFile, setActiveFile, isLoading } = useProjectSocket(projectId);
   const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Track unread logs
+  useEffect(() => {
+      if (!showTerminal && logs.length > 0) {
+          setHasUnreadLogs(true);
+      }
+  }, [logs, showTerminal]);
+
+  // Clear unread logs when terminal is opened
+  useEffect(() => {
+      if (showTerminal) {
+          setHasUnreadLogs(false);
+      }
+  }, [showTerminal]);
 
   // Fetch Recent Projects
   useEffect(() => {
@@ -74,7 +89,7 @@ export default function Home() {
       });
       const data = await res.json();
       setProjectId(data.project_id);
-      setShowTerminal(true);
+      // setShowTerminal(true); // Disable auto-open
     } catch (err) {
       console.error(err);
     } finally {
@@ -89,34 +104,42 @@ export default function Home() {
   };
 
   const showDashboard = !!projectId;
+  const isGraphFocus = showDashboard && activeTab === "graph";
   
   // Progress Calculation
   const completedTasks = tasks.filter(t => t.status === 'completed').length;
   const totalTasks = tasks.length;
   const progress = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
 
-  return (
-    <div className="flex h-screen w-full bg-cosmic text-slate-200 font-sans overflow-hidden relative selection:bg-indigo-500/30">
-      
-      {/* Global Ambient Glow */}
-      <div className="fixed inset-0 z-0 pointer-events-none">
-         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-purple-600/10 blur-[150px] animate-pulse-slow" />
-         <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[150px] animate-pulse-slow delay-1000" />
-      </div>
-
-      {showDashboard && (
-        <Sidebar 
-          activeTab={activeTab} 
-          setActiveTab={setActiveTab} 
+  const renderCommandPalette = () => {
+    if (!showPalette) return null;
+    return (
+      <div
+        className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-start justify-center pt-[20vh]"
+        onClick={() => setShowPalette(false)}
+      >
+        <CommandPalette
+          onClose={() => setShowPalette(false)}
+          files={files}
+          onSelectFile={setActiveFile}
+          onStartProject={startProject}
+          onSelectProject={(id) => setProjectId(id)}
+          recentProjects={recentProjects}
           onToggleTerminal={() => setShowTerminal(!showTerminal)}
-          sidebarOpen={sidebarOpen}
-          setSidebarOpen={setSidebarOpen}
+          onToggleViewMode={() => setActiveTab(activeTab === "code" ? "graph" : "code")}
         />
-      )}
+      </div>
+    );
+  };
 
-      <div className="flex-1 flex flex-col relative h-full min-w-0 z-10">
-        
-        {!showDashboard ? (
+  if (!showDashboard) {
+    return (
+      <div className="flex h-screen w-full bg-cosmic text-slate-200 font-sans overflow-hidden relative selection:bg-indigo-500/30">
+        <div className="fixed inset-0 z-0 pointer-events-none">
+          <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-purple-600/10 blur-[150px] animate-pulse-slow" />
+          <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[150px] animate-pulse-slow delay-1000" />
+        </div>
+        <div className="flex-1 flex flex-col relative h-full min-w-0 z-10">
           <LandingHero
             idea={idea}
             setIdea={setIdea}
@@ -125,82 +148,116 @@ export default function Home() {
             recentProjects={recentProjects}
             onSelectProject={(id) => setProjectId(id)}
           />
-        ) : (
-          <>
-            {/* Top Bar (Glass) */}
-            <header className="h-12 border-b border-white/5 bg-black/20 backdrop-blur-md flex items-center px-6 justify-between shrink-0 z-20">
-               <div className="flex items-center text-xs text-slate-500 font-mono gap-3">
-                  <button onClick={() => setSidebarOpen(!sidebarOpen)} className="hover:text-white transition-colors">
-                      <div className="w-5 h-5 flex flex-col justify-center gap-1">
-                          <div className="w-full h-px bg-current" />
-                          <div className="w-full h-px bg-current" />
-                          <div className="w-full h-px bg-current" />
-                      </div>
-                  </button>
-                  <span className="text-indigo-400 font-bold tracking-widest text-glow">HIVE PROTOCOL</span>
-                  <span className="mx-2 opacity-30">/</span>
-                  <span className="text-slate-200 font-medium tracking-wide">{idea.substring(0, 40) || "NEW_MISSION"}</span>
-               </div>
-               <div className="flex items-center gap-3">
-                  <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border transition-all duration-500 ${isConnected ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]" : "bg-red-500/10 border-red-500/20 text-red-400"}`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse" : "bg-red-400"}`} />
-                    {isConnected ? "Neural Link Active" : "Offline"}
-                  </div>
-               </div>
-            </header>
+          {renderCommandPalette()}
+        </div>
+      </div>
+    );
+  }
 
-            {/* Main Workspace */}
-            <main className="flex-1 flex overflow-hidden relative p-4 gap-4">
-              
-              {/* Left Column (Squad & Plan) - Visible only in 'files' or 'graph' view */}
-              {(activeTab === 'files' || activeTab === 'graph') && (
-                <div className="w-80 flex flex-col gap-4 shrink-0 animate-slide-in-left">
-                   <SquadPanel agents={agents} />
-                   <PlanTimeline tasks={tasks} progress={progress} />
-                </div>
-              )}
+  if (isGraphFocus) {
+    return (
+      <div className="relative h-screen w-full bg-gradient-to-br from-[#01000b] via-[#020217] to-[#03030c] text-slate-200 overflow-hidden font-sans">
+        <Viewport
+          viewMode="graph"
+          files={files}
+          activeFile={activeFile}
+          setActiveFile={setActiveFile}
+          onDownload={handleDownload}
+          projectId={projectId!}
+          agents={agents}
+          tasks={tasks}
+          graphFocus
+          onExitGraph={() => setActiveTab("files")}
+        />
 
-              {/* Center (Viewport) */}
-              <div className="flex-1 min-w-0 animate-fade-in">
-                  <Viewport
-                    viewMode={activeTab === 'graph' ? 'graph' : 'code'}
-                    files={files}
-                    activeFile={activeFile}
-                    setActiveFile={setActiveFile}
-                    onDownload={handleDownload}
-                    projectId={projectId!}
-                    agents={agents}
-                    tasks={tasks}
-                  />
+        <div className="absolute top-6 left-6 flex gap-3 z-40">
+          <button
+            onClick={() => setShowTerminal(true)}
+            className="px-4 py-2 rounded-full bg-white/10 border border-white/20 text-xs uppercase tracking-widest hover:bg-white/20 transition"
+          >
+            Logs
+          </button>
+          <button
+            onClick={() => setShowPalette(true)}
+            className="px-4 py-2 rounded-full bg-white/10 border border-white/20 text-xs uppercase tracking-widest hover:bg-white/20 transition"
+          >
+            Cmd ⌘K
+          </button>
+        </div>
+
+        <TerminalPanel logs={logs} showTerminal={showTerminal} setShowTerminal={setShowTerminal} logsEndRef={logsEndRef} />
+        {renderCommandPalette()}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-screen w-full bg-cosmic text-slate-200 font-sans overflow-hidden relative selection:bg-indigo-500/30">
+      <div className="fixed inset-0 z-0 pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-purple-600/10 blur-[150px] animate-pulse-slow" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[150px] animate-pulse-slow delay-1000" />
+      </div>
+
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onToggleTerminal={() => setShowTerminal(!showTerminal)}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        hasUnreadLogs={hasUnreadLogs}
+      />
+
+      <div className="flex-1 flex flex-col relative h-full min-w-0 z-10">
+        <header className="h-12 border-b border-white/5 bg-black/20 backdrop-blur-md flex items-center px-6 justify-between shrink-0 z-20">
+          <div className="flex items-center text-xs text-slate-500 font-mono gap-3">
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="hover:text-white transition-colors">
+              <div className="w-5 h-5 flex flex-col justify-center gap-1">
+                <div className="w-full h-px bg-current" />
+                <div className="w-full h-px bg-current" />
+                <div className="w-full h-px bg-current" />
               </div>
+            </button>
+            <span className="text-indigo-400 font-bold tracking-widest text-glow">ASTRAMIND</span>
+            <span className="mx-2 opacity-30">/</span>
+            <span className="text-slate-200 font-medium tracking-wide">{idea.substring(0, 40) || "NEW_MISSION"}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div
+              className={`flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border transition-all duration-500 ${
+                isConnected
+                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+                  : "bg-red-500/10 border-red-500/20 text-red-400"
+              }`}
+            >
+              <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse" : "bg-red-400"}`} />
+              {isConnected ? "Neural Link Active" : "Offline"}
+            </div>
+          </div>
+        </header>
 
-            </main>
+        <main className="flex-1 flex overflow-hidden relative p-4 gap-4">
+          {(activeTab === "files" || activeTab === "code") && (
+            <div className={`flex flex-col gap-4 shrink-0 animate-slide-in-left transition-all duration-300 ${sidebarOpen ? "w-80" : "w-0 opacity-0 overflow-hidden"}`}>
+              <SquadPanel agents={agents} isLoading={isLoading} />
+              <PlanTimeline tasks={tasks} progress={progress} isLoading={isLoading} />
+            </div>
+          )}
 
-            {/* Bottom Panel (Terminal) */}
-            <TerminalPanel 
-              logs={logs} 
-              showTerminal={showTerminal} 
-              setShowTerminal={setShowTerminal} 
-              logsEndRef={logsEndRef}
+          <div className="flex-1 min-w-0 animate-fade-in">
+            <Viewport
+              viewMode={activeTab === "graph" ? "graph" : "code"}
+              files={files}
+              activeFile={activeFile}
+              setActiveFile={setActiveFile}
+              onDownload={handleDownload}
+              projectId={projectId!}
+              agents={agents}
+              tasks={tasks}
             />
-          </>
-        )}
-        
-        {/* Command Palette Modal (Placeholder if not fully implemented) */}
-        {showPalette && (
-             <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-start justify-center pt-[20vh]" onClick={() => setShowPalette(false)}>
-                 <CommandPalette 
-                    onClose={() => setShowPalette(false)} 
-                    files={files} 
-                    onSelectFile={setActiveFile}
-                    onStartProject={startProject}
-                    onSelectProject={(id) => setProjectId(id)}
-                    recentProjects={recentProjects}
-                    onToggleTerminal={() => setShowTerminal(!showTerminal)}
-                    onToggleViewMode={() => setActiveTab(activeTab === 'code' ? 'graph' : 'code')}
-                 />
-             </div>
-        )}
+          </div>
+        </main>
+        <TerminalPanel logs={logs} showTerminal={showTerminal} setShowTerminal={setShowTerminal} logsEndRef={logsEndRef} />
+        {renderCommandPalette()}
       </div>
     </div>
   );

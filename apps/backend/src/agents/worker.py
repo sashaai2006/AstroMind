@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 def _detect_language(filename: str) -> str:
     if filename.endswith(".py"):
         return "python"
+    if filename.endswith(".js") or filename.endswith(".ts"):
+        return "javascript"
     return ""
 
 
@@ -40,7 +42,7 @@ async def process_single_task(task, agents_map, state, llm):
 
 IMPORTANT:
 - Output only the final file content (no extra prose).
-- Begin with '# filename: <name>'.
+- Begin with '# filename: <name>' (or // filename: <name> for JS).
 - Wrap code in a fenced block if multi-line."""
 
         base_context = f"Project Context: {state.get('user_request')}\n\nCurrent Task: {task['description']}"
@@ -63,7 +65,7 @@ IMPORTANT:
             ])
 
             content = response.content
-            name_match = re.search(r"^#\s*filename:\s*(.+)$", content, re.MULTILINE | re.IGNORECASE)
+            name_match = re.search(r"^(?:#|//)\s*filename:\s*(.+)$", content, re.MULTILINE | re.IGNORECASE)
             if name_match:
                 filename = name_match.group(1).strip()
 
