@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import OrderedDict
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
@@ -121,8 +122,10 @@ class Orchestrator:
     ) -> None:
         project_id = UUID(context["project_id"])
         task_id = UUID(step.get("id") or str(uuid4()))
+        
+        # Optimized: Update task status and record event in ONE transaction
         async with get_session() as session:
-            await db_utils.upsert_task(
+            await db_utils.update_task_and_record_event(
                 session,
                 project_id=project_id,
                 task_id=task_id,
@@ -131,21 +134,57 @@ class Orchestrator:
                 status="running",
                 parallel_group=step.get("parallel_group"),
                 payload=step.get("payload", {}),
+                event_message=f"Step {step.get('name')} started",
             )
-        await self._emit_event(
-            project_id,
-            f"Step {step.get('name')} started",
-            agent=step.get("agent", "developer"),
+        
+        # Must broadcast manually since we bypassed _emit_event
+        await ws_manager.broadcast(
+            str(project_id),
+            {
+                "type": "event",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "project_id": str(project_id),
+                "agent": step.get("agent", "developer"),
+                "level": "info",
+                "msg": f"Step {step.get('name')} started",
+            },
         )
 
+        status = "running"  # Default status in case of cancellation
         try:
             await self._developer.run(step, context, stop_event)
             status = "done"
-            await self._emit_event(
-                project_id,
-                f"Step {step.get('name')} finished",
-                agent=step.get("agent", "developer"),
+            
+            # Optimized: Update task status and record event in ONE transaction
+            async with get_session() as session:
+                await db_utils.update_task_and_record_event(
+                    session,
+                    project_id=project_id,
+                    task_id=task_id,
+                    name=step.get("name", "unknown"),
+                    agent=step.get("agent", "developer"),
+                    status=status,
+                    parallel_group=step.get("parallel_group"),
+                    payload=step.get("payload", {}),
+                    event_message=f"Step {step.get('name')} finished",
+                )
+            
+            await ws_manager.broadcast(
+                str(project_id),
+                {
+                    "type": "event",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "project_id": str(project_id),
+                    "agent": step.get("agent", "developer"),
+                    "level": "info",
+                    "msg": f"Step {step.get('name')} finished",
+                },
             )
+            
+        except asyncio.CancelledError:
+            status = "failed"
+            LOGGER.warning("Step %s was cancelled", step.get("name"))
+            raise
         except Exception as exc:  # noqa: BLE001
             status = "failed"
             await self._emit_event(
@@ -156,17 +195,22 @@ class Orchestrator:
             )
             raise
         finally:
-            async with get_session() as session:
-                await db_utils.upsert_task(
-                    session,
-                    project_id=project_id,
-                    task_id=task_id,
-                    name=step.get("name", "unknown"),
-                    agent=step.get("agent", "developer"),
-                    status=status,
-                    parallel_group=step.get("parallel_group"),
-                    payload=step.get("payload", {}),
-                )
+            # Cleanup if needed (status already updated if success)
+            if status == "failed":
+                try:
+                    async with get_session() as session:
+                        await db_utils.upsert_task(
+                            session,
+                            project_id=project_id,
+                            task_id=task_id,
+                            name=step.get("name", "unknown"),
+                            agent=step.get("agent", "developer"),
+                            status=status,
+                            parallel_group=step.get("parallel_group"),
+                            payload=step.get("payload", {}),
+                        )
+                except Exception:
+                    pass
 
     async def _mark_done(self, project_id: UUID) -> None:
         async with get_session() as session:
@@ -190,20 +234,15 @@ class Orchestrator:
         artifact_path: Optional[str] = None,
         data: Optional[Dict[str, Any]] = None,
     ) -> None:
-        async with get_session() as session:
-            event = await db_utils.record_event(
-                session,
-                project_id,
-                message,
-                agent=agent,
-                level=level,
-                data=data or {},
-            )
+        """Emit event to WS and record in DB asynchronously (fire-and-forget for DB)."""
+        timestamp = datetime.now(timezone.utc).isoformat()
+        
+        # 1. Send to WS immediately
         await ws_manager.broadcast(
             str(project_id),
             {
                 "type": "event",
-                "timestamp": event.timestamp.isoformat(),
+                "timestamp": timestamp,
                 "project_id": str(project_id),
                 "agent": agent,
                 "level": level,
@@ -212,6 +251,26 @@ class Orchestrator:
                 "data": data or {},
             },
         )
+        
+        # 2. Record in DB in background (don't await)
+        asyncio.create_task(self._record_event_bg(
+            project_id, message, agent, level, data
+        ))
+
+    async def _record_event_bg(self, project_id: UUID, message: str, agent: str, level: str, data: Optional[Dict[str, Any]]) -> None:
+        """Background task to record event in DB."""
+        try:
+            async with get_session() as session:
+                await db_utils.record_event(
+                    session,
+                    project_id,
+                    message,
+                    agent=agent,
+                    level=level,
+                    data=data or {},
+                )
+        except Exception as e:
+            LOGGER.error("Failed to record event in bg: %s", e)
 
     def _group_steps(self, steps: List[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
         groups: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
@@ -222,4 +281,3 @@ class Orchestrator:
 
 
 orchestrator = Orchestrator()
-

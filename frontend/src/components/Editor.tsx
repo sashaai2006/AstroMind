@@ -11,16 +11,29 @@ type Props = {
   language: string;
   onSave: (nextContent: string) => Promise<void>;
   onFix?: () => void;
+  onDeepReview?: () => void;
 };
 
-const Editor: React.FC<Props> = ({ path, content, language, onSave, onFix }) => {
+const Editor: React.FC<Props> = ({ path, content, language, onSave, onFix, onDeepReview }) => {
   const [value, setValue] = useState(content);
   const [saving, setSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
 
+  // Sync value with content prop directly (no typewriter effect)
   useEffect(() => {
     setValue(content);
-  }, [content, path]);
+  }, [content]);
+
+  const handleDeepReview = async () => {
+      if (!onDeepReview) return;
+      setReviewing(true);
+      try {
+          await onDeepReview();
+      } finally {
+          setReviewing(false);
+      }
+  };
 
   if (!path) {
     return <div style={{ padding: "1rem", color: "#9ca3af", display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }}>Select a file to view its contents.</div>;
@@ -84,7 +97,22 @@ const Editor: React.FC<Props> = ({ path, content, language, onSave, onFix }) => 
             </div>
           )}
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {onDeepReview && (
+                <button 
+                    type="button" 
+                    onClick={handleDeepReview}
+                    disabled={reviewing}
+                    title="Run AI code review on this file"
+                    style={{
+                        background: "rgba(147, 51, 234, 0.2)",
+                        color: "#c4b5fd",
+                        border: "1px solid rgba(147, 51, 234, 0.3)"
+                    }}
+                >
+                  {reviewing ? "🔍 Reviewing..." : "🔍 Deep Review"}
+                </button>
+            )}
             {onFix && (
                 <button 
                     type="button" 

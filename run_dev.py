@@ -12,11 +12,20 @@ async def main():
     venv_bin = script_dir / ".venv" / "bin"
     
     # Backend - use uvicorn from venv
+    # IMPORTANT: Exclude projects/ folder from watchfiles to prevent restarts during generation
     uvicorn_path = venv_bin / "uvicorn"
     if not uvicorn_path.exists():
         print("Error: Virtual environment not found. Run 'make init' first.")
         sys.exit(1)
-    backend_cmd = [str(uvicorn_path), "backend.main:app", "--reload"]
+    backend_cmd = [
+        str(uvicorn_path), 
+        "backend.main:app", 
+        "--reload",
+        "--reload-exclude", "projects/*",
+        "--reload-exclude", "*.db",
+        "--reload-exclude", "*.db-shm",
+        "--reload-exclude", "*.db-wal",
+    ]
     procs.append(await asyncio.create_subprocess_exec(*backend_cmd))
     
     # Frontend
@@ -53,4 +62,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         sys.exit(0)
-

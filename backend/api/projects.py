@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import mimetypes
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -12,6 +11,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.agents.refactor import RefactorAgent
+from backend.agents.reviewer import ReviewerAgent
 from backend.core.orchestrator import orchestrator
 from backend.core.ws_manager import ws_manager
 from backend.memory import utils as db_utils
@@ -31,11 +31,17 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 LOGGER = get_logger(__name__)
 refactor_agent = RefactorAgent()
+reviewer_agent = ReviewerAgent()
 
 
 class ChatRequest(BaseModel):
     message: str
     history: Optional[List[Dict[str, str]]] = None
+
+
+class DeepReviewRequest(BaseModel):
+    """Request for deep code review."""
+    paths: List[str]  # List of file paths to review
 
 
 def _project_path(project_id: UUID) -> Path:
@@ -141,6 +147,85 @@ async def chat_with_project(project_id: UUID, payload: ChatRequest) -> dict:
     """Chat with the RefactorAgent to modify the project."""
     response = await refactor_agent.chat(project_id, payload.message, payload.history)
     return {"response": response}
+
+
+@router.post("/{project_id}/review")
+async def deep_review(project_id: UUID, payload: DeepReviewRequest) -> dict:
+    """
+    Deep review: run ReviewerAgent on specified files.
+    Returns review comments and approval status.
+    """
+    project_path = _project_path(project_id)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Read file contents
+    files_to_review = []
+    for path in payload.paths:
+        try:
+            data, is_text = fileutils.read_project_file(project_path, path)
+            if is_text:
+                files_to_review.append({
+                    "path": path,
+                    "content": data.decode("utf-8")
+                })
+        except FileNotFoundError:
+            continue
+    
+    if not files_to_review:
+        raise HTTPException(status_code=400, detail="No valid files to review")
+    
+    # Broadcast that review is starting
+    await ws_manager.broadcast(
+        str(project_id),
+        {
+            "type": "event",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "project_id": str(project_id),
+            "agent": "reviewer",
+            "level": "info",
+            "msg": f"Deep review started for {len(files_to_review)} files...",
+        },
+    )
+    
+    # Run review (parallel if multiple files)
+    if len(files_to_review) == 1:
+        result = await reviewer_agent.review(
+            f"Review this file: {files_to_review[0]['path']}", 
+            files_to_review
+        )
+    else:
+        # Parallel review for multiple files
+        tasks = [
+            reviewer_agent.review(f"Review file: {f['path']}", [f])
+            for f in files_to_review
+        ]
+        results = await asyncio.gather(*tasks)
+        
+        # Merge results
+        all_comments = []
+        all_approved = True
+        for r in results:
+            all_comments.extend(r.get("comments", []))
+            if not r.get("approved", True):
+                all_approved = False
+        result = {"approved": all_approved, "comments": all_comments}
+    
+    # Broadcast result
+    level = "info" if result.get("approved") else "warning"
+    await ws_manager.broadcast(
+        str(project_id),
+        {
+            "type": "event",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "project_id": str(project_id),
+            "agent": "reviewer",
+            "level": level,
+            "msg": f"Review complete. Approved: {result.get('approved')}. Comments: {len(result.get('comments', []))}",
+        },
+    )
+    
+    return result
 
 
 @router.get("/{project_id}/download")

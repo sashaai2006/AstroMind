@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     llm_mode: Literal["mock", "ollama", "groq"] = Field(default="mock", env="LLM_MODE")
     ollama_model: str = Field(default="llama3.2:3b", env="OLLAMA_MODEL")
     groq_model: str = Field(default="llama-3.1-8b-instant", env="GROQ_MODEL")
-    llm_semaphore: int = Field(default=3, env="LLM_SEMAPHORE")
+    llm_semaphore: int = Field(default=10, env="LLM_SEMAPHORE")  # Increased for parallelism
     github_api_url: str = Field(
         default="https://api.github.com", env="GITHUB_API_URL"
     )
@@ -28,4 +28,3 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.projects_root.mkdir(parents=True, exist_ok=True)
     return settings
-

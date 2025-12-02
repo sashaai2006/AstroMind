@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Optional
 
 from .adapter import BaseLLMAdapter
 
@@ -8,7 +9,7 @@ from .adapter import BaseLLMAdapter
 class MockLLMAdapter(BaseLLMAdapter):
     """Deterministic adapter for tests and local development."""
 
-    async def acomplete(self, prompt: str, json_mode: bool = False) -> str:
+    async def acomplete(self, prompt: str, json_mode: bool = False, cache_key: Optional[str] = None) -> str:
         marker = "FILES_SPEC::"
         if marker in prompt:
             _, payload = prompt.split(marker, maxsplit=1)

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -15,13 +16,18 @@ def ensure_project_dir(projects_root: Path, project_id: str, meta: Dict[str, str
     return project_path
 
 
+async def ensure_project_dir_async(projects_root: Path, project_id: str, meta: Dict[str, str]) -> Path:
+    """Async wrapper for ensure_project_dir."""
+    return await asyncio.to_thread(ensure_project_dir, projects_root, project_id, meta)
+
+
 def iter_file_entries(project_path: Path) -> List[FileEntry]:
     entries: List[FileEntry] = []
     for root, dirs, files in os.walk(project_path):
         rel_root = Path(root).relative_to(project_path)
         for directory in dirs:
             dir_path = (rel_root / directory).as_posix()
-            full = Path(root) / directory
+            # full = Path(root) / directory
             entries.append(
                 FileEntry(
                     path=dir_path if dir_path != "." else directory,
@@ -42,6 +48,11 @@ def iter_file_entries(project_path: Path) -> List[FileEntry]:
     return entries
 
 
+async def iter_file_entries_async(project_path: Path) -> List[FileEntry]:
+    """Async wrapper for iter_file_entries to avoid blocking the event loop."""
+    return await asyncio.to_thread(iter_file_entries, project_path)
+
+
 def read_project_file(project_path: Path, relative_path: str) -> Tuple[bytes, bool]:
     full_path = (project_path / relative_path).resolve()
     if not str(full_path).startswith(str(project_path.resolve())) or not full_path.exists():
@@ -56,6 +67,11 @@ def read_project_file(project_path: Path, relative_path: str) -> Tuple[bytes, bo
     return data, is_text
 
 
+async def read_project_file_async(project_path: Path, relative_path: str) -> Tuple[bytes, bool]:
+    """Async wrapper for read_project_file."""
+    return await asyncio.to_thread(read_project_file, project_path, relative_path)
+
+
 def build_project_zip(project_path: Path) -> Path:
     zip_path = project_path / "project.zip"
     with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as zip_file:
@@ -63,6 +79,11 @@ def build_project_zip(project_path: Path) -> Path:
             if file.is_file() and file.name != "project.zip":
                 zip_file.write(file, arcname=file.relative_to(project_path))
     return zip_path
+
+
+async def build_project_zip_async(project_path: Path) -> Path:
+    """Async wrapper for build_project_zip."""
+    return await asyncio.to_thread(build_project_zip, project_path)
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -88,3 +109,7 @@ def write_files(project_path: Path, files: Iterable[Dict[str, str]]) -> List[Pat
         saved.append(dest)
     return saved
 
+
+async def write_files_async(project_path: Path, files: Iterable[Dict[str, str]]) -> List[Path]:
+    """Async wrapper for write_files."""
+    return await asyncio.to_thread(write_files, project_path, files)

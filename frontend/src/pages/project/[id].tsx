@@ -1,5 +1,5 @@
 import { useRouter } from "next/router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import FileTree, { FileEntry } from "../../components/FileTree";
 import Editor from "../../components/Editor";
 import ChatPanel, { Message } from "../../components/ChatPanel";
@@ -33,6 +33,10 @@ export default function ProjectPage() {
   const [status, setStatus] = useState<string>("");
 
   const [activeTab, setActiveTab] = useState<"editor" | "dag">("editor");
+  
+  // Refs to access latest state in WS callback without re-subscribing
+  const selectedFileRef = useRef(selectedFile);
+  useEffect(() => { selectedFileRef.current = selectedFile; }, [selectedFile]);
 
   const fetchFiles = useCallback(async () => {
     if (!projectId) return;
@@ -87,10 +91,12 @@ export default function ProjectPage() {
         if (data.type === "event") {
           setLogs((prev) => [...prev.slice(-199), data]);
           fetchStatus();
-          // If artifact saved, refresh file tree
           if (data.artifact_path) {
             fetchFiles();
             soundManager.playSuccess();
+            if (selectedFileRef.current && data.artifact_path === selectedFileRef.current) {
+                 fetchFileContent(selectedFileRef.current);
+            }
           }
         }
       } catch {
@@ -98,7 +104,7 @@ export default function ProjectPage() {
       }
     };
     return () => ws.close();
-  }, [projectId, fetchStatus]);
+  }, [projectId, fetchStatus, fetchFiles, fetchFileContent]);
 
   const handleSave = async (content: string) => {
     if (!projectId || !selectedFile) return;
@@ -122,29 +128,51 @@ export default function ProjectPage() {
       throw new Error("Failed to send message");
     }
     const data = await response.json();
-    // Refresh files if chat agent modified them
     fetchFiles();
     return data.response;
   };
 
-  // NEW: Handle auto-fix request
+  // Handle auto-fix request
   const handleFix = async () => {
     if (!selectedFile || !fileContent) return;
     
     const prompt = `I am having trouble with this file: ${selectedFile}.\n\nContent:\n${fileContent}\n\nPlease analyze it for errors (syntax, logic, or best practices) and fix them. Return the corrected file content.`;
     
-    // We can reuse the chat mechanism!
-    // But first, let's switch to chat view so user sees the process
-    // Ideally, we'd have a way to programmatically invoke chat from outside.
-    // For now, we will just call the API and let the user see the result in logs/file update.
+    soundManager.playClick();
+    
+    try {
+        const history: Message[] = [{ role: "user", content: prompt }];
+        await handleChat(prompt, history);
+        soundManager.playSuccess();
+    } catch (e) {
+        console.error(e);
+    }
+  };
+
+  // Handle Deep Review request
+  const handleDeepReview = async () => {
+    if (!projectId || !selectedFile) return;
     
     soundManager.playClick();
     
     try {
-        // We manually construct a history entry
-        const history: Message[] = [{ role: "user", content: prompt }];
-        await handleChat(prompt, history);
-        soundManager.playSuccess();
+        const response = await fetch(`${API_BASE}/api/projects/${projectId}/review`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paths: [selectedFile] }),
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            soundManager.playSuccess();
+            
+            // Show result in alert (could be improved with a modal)
+            if (result.approved) {
+                alert(`✅ Code Approved!\n\nNo critical issues found.`);
+            } else {
+                alert(`⚠️ Review Comments:\n\n${result.comments.join('\n\n')}`);
+            }
+        }
     } catch (e) {
         console.error(e);
     }
@@ -211,7 +239,8 @@ export default function ProjectPage() {
                     content={fileContent}
                     language={selectedFile ? languageFromPath(selectedFile) : "plaintext"}
                     onSave={handleSave}
-                    onFix={handleFix} // Pass the fix handler
+                    onFix={handleFix}
+                    onDeepReview={handleDeepReview}
                   />
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>

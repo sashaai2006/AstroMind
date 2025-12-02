@@ -27,6 +27,7 @@ async def record_event(
     agent: Optional[str] = None,
     level: str = "info",
     data: Optional[Dict[str, Any]] = None,
+    commit: bool = True,
 ) -> Event:
     event = Event(
         project_id=project_id,
@@ -36,8 +37,9 @@ async def record_event(
         data=data or {},
     )
     session.add(event)
-    await session.commit()
-    await session.refresh(event)
+    if commit:
+        await session.commit()
+        await session.refresh(event)
     return event
 
 
@@ -51,28 +53,68 @@ async def upsert_task(
     status: str,
     parallel_group: Optional[str],
     payload: Dict[str, Any],
+    commit: bool = True,
 ) -> Task:
     result = await session.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
     if task:
         task.status = status
         task.payload = payload
+    else:
+        task = Task(
+            id=task_id,
+            project_id=project_id,
+            name=name,
+            agent=agent,
+            status=status,
+            parallel_group=parallel_group,
+            payload=payload,
+        )
+        session.add(task)
+    
+    if commit:
         await session.commit()
         await session.refresh(task)
-        return task
-    task = Task(
-        id=task_id,
+    return task
+
+
+async def update_task_and_record_event(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    name: str,
+    agent: str,
+    status: str,
+    parallel_group: Optional[str],
+    payload: Dict[str, Any],
+    event_message: str,
+    event_level: str = "info",
+) -> None:
+    """Update task status and record an event in a single transaction."""
+    # Upsert Task (no commit)
+    await upsert_task(
+        session,
         project_id=project_id,
+        task_id=task_id,
         name=name,
         agent=agent,
         status=status,
         parallel_group=parallel_group,
         payload=payload,
+        commit=False
     )
-    session.add(task)
+    # Record Event (no commit)
+    await record_event(
+        session,
+        project_id=project_id,
+        message=event_message,
+        agent=agent,
+        level=event_level,
+        commit=False
+    )
+    # Single commit for both
     await session.commit()
-    await session.refresh(task)
-    return task
 
 
 async def list_tasks(session: AsyncSession, project_id: UUID) -> List[Task]:
@@ -105,4 +147,3 @@ async def update_project_status(
     await session.commit()
     result = await session.execute(select(Project).where(Project.id == project_id))
     return result.scalar_one()
-

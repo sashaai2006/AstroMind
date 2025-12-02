@@ -1,19 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
-import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
-
-from pathlib import Path
 
 from backend.core.ws_manager import ws_manager
 from backend.llm.adapter import get_llm_adapter
 from backend.memory import utils as db_utils
 from backend.memory.db import get_session
 from backend.settings import get_settings
-from backend.utils.fileutils import write_files
+from backend.utils.fileutils import write_files_async
 from backend.utils.json_parser import clean_and_parse_json
 from backend.utils.logging import get_logger
 
@@ -28,7 +27,7 @@ class DeveloperAgent:
         self._settings = get_settings()
         self._semaphore = llm_semaphore
 
-    async def _broadcast_thought(self, project_id: str, msg: str, level: str = "info"):
+    async def _broadcast_thought(self, project_id: str, msg: str, level: str = "info", agent: str = "developer"):
         """Helper to broadcast agent thoughts to the UI."""
         await ws_manager.broadcast(
             project_id,
@@ -36,7 +35,7 @@ class DeveloperAgent:
                 "type": "event",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "project_id": project_id,
-                "agent": "developer",
+                "agent": agent,
                 "level": level,
                 "msg": msg,
             },
@@ -48,6 +47,7 @@ class DeveloperAgent:
         context: Dict[str, Any],
         stop_event,
     ) -> None:
+        """Fast mode: generate code without review (default)."""
         project_id = context["project_id"]
         if stop_event.is_set():
             LOGGER.info("Project %s stop requested; skipping step.", project_id)
@@ -56,58 +56,116 @@ class DeveloperAgent:
         payload = step.get("payload", {})
         files_spec = payload.get("files", [])
         
-        await self._broadcast_thought(project_id, f"Analying specs for step: {step.get('name')}...")
+        await self._broadcast_thought(project_id, f"Analyzing specs for step: {step.get('name')}...")
+        await self._broadcast_thought(project_id, "Generating code (fast mode)...")
 
-        # Initial prompt
-        prompt = self._build_prompt(context, step, files_spec)
+        # Generate each file independently to avoid output token limits
+        tasks = [
+            self._generate_single_file(spec, context, step, stop_event)
+            for spec in files_spec
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        await self._broadcast_thought(project_id, "Generating code with LLM...")
+        file_defs: List[Dict[str, str]] = []
+        for spec, result in zip(files_spec, results):
+            if isinstance(result, Exception):
+                path_value = spec.get("path", "unknown_artifact.txt")
+                LOGGER.error("DeveloperAgent error for %s: %s", path_value, result)
+                await self._broadcast_thought(
+                    project_id,
+                    f"Failed to generate {path_value}: {result}",
+                    "error",
+                )
+                file_defs.append(
+                    {
+                        "path": path_value,
+                        "content": f"// Failed to generate content for {path_value}.\n// Error: {result}",
+                    }
+                )
+            else:
+                file_defs.append(result)
+
+        await self._save_files(project_id, step, file_defs)
+        await self._broadcast_thought(project_id, f"Step '{step.get('name')}' completed successfully.")
+
+    async def _generate_single_file(
+        self,
+        spec: Dict[str, Any],
+        context: Dict[str, Any],
+        step: Dict[str, Any],
+        stop_event,
+    ) -> Dict[str, str]:
+        """Generate a single file using the LLM."""
+        if stop_event.is_set():
+            raise asyncio.CancelledError()
+
+        project_id = context["project_id"]
+        path_value = spec.get("path", "unknown_artifact.txt")
+
+        prompt = self._build_prompt(context, step, [spec])
         parsed_response = await self._execute_with_retry(prompt, step, context)
+        file_defs = self._normalize_files(
+            parsed_response.get("files") if parsed_response else [],
+            project_id,
+        )
 
-        # Fallback to empty files only if absolutely necessary
-        file_defs = parsed_response.get("files") if parsed_response else []
-        file_defs = self._normalize_files(file_defs, project_id)
-        
         if not file_defs:
-             # Try to fallback to specs if available, but this is usually just instructions
-             # Better to save a placeholder saying it failed
-             LOGGER.warning("DeveloperAgent failed to generate files for step %s. Saving failure artifacts.", step.get("name"))
-             await self._broadcast_thought(project_id, "Failed to generate valid code. Saving error stubs.", "error")
-             file_defs = []
-             for spec in files_spec:
-                 file_defs.append({
-                     "path": spec.get("path", "unknown_artifact.txt"),
-                     "content": f"// Failed to generate content for {spec.get('path')}.\n// Please check logs."
-                 })
+            raise RuntimeError(f"LLM returned no content for {path_value}")
 
+        for file_def in file_defs:
+            if file_def["path"] == path_value:
+                return file_def
+        return file_defs[0]
+
+    async def _save_files(self, project_id: str, step: Dict[str, Any], file_defs: List[Dict[str, str]]) -> None:
+        """Save files to disk and record artifacts."""
         project_path = self._settings.projects_root / project_id
         project_path.mkdir(parents=True, exist_ok=True)
         project_root = project_path.resolve()
         
         await self._broadcast_thought(project_id, f"Writing {len(file_defs)} files to disk...")
-        saved = write_files(project_path, file_defs)
-        relative_paths = [s.relative_to(project_root).as_posix() for s in saved]
-        sizes = [s.stat().st_size for s in saved]
+        
+        # Use async write
+        saved = await write_files_async(project_path, file_defs)
+        
+        # Helper to get size async
+        def get_file_info(path: Path, root: Path):
+            return path.relative_to(root).as_posix(), path.stat().st_size
+
+        # Run stats collection in thread pool
+        file_infos = await asyncio.to_thread(
+            lambda: [get_file_info(s, project_root) for s in saved]
+        )
+        
+        relative_paths = [info[0] for info in file_infos]
+        sizes = [info[1] for info in file_infos]
 
         async with get_session() as session:
             await db_utils.add_artifacts(
                 session, UUID(project_id), relative_paths, sizes
             )
 
+        # Batch WebSocket broadcasts using gather
+        tasks = []
+        timestamp = datetime.now(timezone.utc).isoformat()
+        agent_name = step.get("agent", "developer")
+        
         for rel_path in relative_paths:
-            await ws_manager.broadcast(
+            tasks.append(ws_manager.broadcast(
                 project_id,
                 {
                     "type": "event",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": timestamp,
                     "project_id": project_id,
-                    "agent": step.get("agent", "developer"),
+                    "agent": agent_name,
                     "level": "info",
                     "msg": f"Artifact saved: {rel_path}",
                     "artifact_path": rel_path,
                 },
-            )
-        await self._broadcast_thought(project_id, f"Step '{step.get('name')}' completed successfully.")
+            ))
+        
+        if tasks:
+            await asyncio.gather(*tasks)
 
     async def _execute_with_retry(self, prompt: str, step: Dict[str, Any], context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Execute LLM call with retries and repair logic."""
@@ -128,7 +186,6 @@ class DeveloperAgent:
                 await self._broadcast_thought(project_id, f"Retrying LLM generation (attempt {attempt + 1}/{max_retries + 1})...", "warning")
 
             async with self._semaphore:
-                # Use JSON mode for native structure enforcement
                 completion = await self._adapter.acomplete(current_prompt, json_mode=True)
             
             LOGGER.info("LLM response received (length=%d)", len(completion))
@@ -136,12 +193,10 @@ class DeveloperAgent:
             try:
                 parsed = clean_and_parse_json(completion)
                 if isinstance(parsed, dict) and "files" in parsed:
-                    # Log reasoning if present
                     if "_thought" in parsed:
                         await self._broadcast_thought(project_id, f"Developer thought: {parsed['_thought']}", "info")
                     return parsed
                 elif isinstance(parsed, list):
-                    # Handle case where LLM returns list of files directly
                     return {"files": parsed}
                 else:
                     raise ValueError("JSON is valid but does not contain 'files' or is not a list")
@@ -149,22 +204,33 @@ class DeveloperAgent:
                 LOGGER.warning("JSON parse failed on attempt %d: %s", attempt + 1, exc)
                 if attempt < max_retries:
                     await self._broadcast_thought(project_id, "Received invalid JSON from LLM. Attempting auto-repair...", "warning")
-                    # Update prompt to ask for repair
                     current_prompt = (
                         "The previous response was invalid JSON. Please fix it.\n"
                         f"Error: {exc}\n"
                         "Return ONLY valid JSON with 'files' array.\n"
                         "Previous response was:\n"
-                        f"{completion[:2000]}" # Limit context
+                        f"{completion[:2000]}" 
                     )
                     continue
         
         return None
 
     def _build_prompt(
-        self, context: Dict[str, Any], step: Dict[str, Any], files_spec: List[Dict[str, Any]]
+        self, 
+        context: Dict[str, Any], 
+        step: Dict[str, Any], 
+        files_spec: List[Dict[str, Any]],
+        feedback: List[str] = []
     ) -> str:
         spec = json.dumps(files_spec, indent=2)
+        feedback_section = ""
+        if feedback:
+            feedback_section = (
+                "\nCRITICAL FEEDBACK FROM REVIEWER (You MUST fix these issues):\n"
+                + "\n".join(f"- {f}" for f in feedback)
+                + "\n"
+            )
+
         return (
             "You are a senior software developer.\n"
             f"Project: {context['title']} ({context['target']})\n"
@@ -174,14 +240,27 @@ class DeveloperAgent:
             "Below is the file specification (paths and instructions). "
             "You must REPLACE the 'content' with actual, working, production-quality code based on the instructions.\n"
             f"FILES_SPEC::{spec}\n"
+            f"{feedback_section}"
             "\n"
-            "Output ONLY valid JSON. The format must be strictly:\n"
+            "Output ONLY valid JSON. The format must be EXACTLY:\n"
             "{\n"
-            '  "_thought": "Step-by-step plan...",\n'
-            '  "files": [ { "path": "...", "content": "..." } ]\n'
+            '  "_thought": "Your step-by-step reasoning here",\n'
+            '  "files": [\n'
+            '    {\n'
+            '      "path": "path/to/file.js",\n'
+            '      "content": "THE ACTUAL CODE AS A STRING - use \\n for newlines, \\\\ for backslashes"\n'
+            '    }\n'
+            '  ]\n'
             "}\n"
-            "IMPORTANT: Do not include any explanations, markdown formatting, or code blocks (like ```json). Just the raw JSON string.\n"
-            "WARNING: Ensure all strings are properly escaped. Do not use triple quotes inside JSON."
+            "\n"
+            "CRITICAL RULES:\n"
+            "1. The 'content' field MUST be a JSON STRING, not an object or array.\n"
+            "2. All newlines in code must be escaped as \\n\n"
+            "3. All quotes in code must be escaped as \\\"\n"
+            "4. All backslashes must be escaped as \\\\\n"
+            "5. Do NOT wrap code in curly braces - just put the raw code string.\n"
+            "6. Do NOT include markdown formatting or code blocks.\n"
+            "7. Return ONLY the JSON object, nothing else."
         )
 
     def _normalize_files(
@@ -205,10 +284,26 @@ class DeveloperAgent:
                 LOGGER.warning("DeveloperAgent skipping unsafe path: %s", path_value)
                 continue
 
+            # CRITICAL: content must be a string, not a dict/list
+            # If LLM returns content as an object, it's an error
             if isinstance(content_value, (dict, list)):
-                content_str = json.dumps(content_value, indent=2)
-            else:
-                content_str = str(content_value)
+                LOGGER.error(
+                    "DeveloperAgent received content as object instead of string for %s. "
+                    "This indicates LLM returned malformed JSON.",
+                    safe_path
+                )
+                # Skip this file - it will trigger a retry or error stub
+                continue
+
+            content_str = str(content_value)
+            
+            # Sanity check: content should not start with '{' unless it's JSON/JS object
+            if content_str.startswith('{"') and not safe_path.endswith('.json'):
+                LOGGER.warning(
+                    "DeveloperAgent: content for %s starts with '{\"' which may indicate "
+                    "LLM returned JSON object instead of code string",
+                    safe_path
+                )
 
             normalized.append({"path": safe_path, "content": content_str})
 

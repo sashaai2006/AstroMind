@@ -8,8 +8,12 @@ from backend.settings import get_settings
 
 class BaseLLMAdapter(ABC):
     @abstractmethod
-    async def acomplete(self, prompt: str, json_mode: bool = False) -> str:
-        """Return raw completion text. If json_mode=True, LLM should be forced to return JSON."""
+    async def acomplete(self, prompt: str, json_mode: bool = False, cache_key: Optional[str] = None) -> str:
+        """
+        Return raw completion text. 
+        If json_mode=True, LLM should be forced to return JSON.
+        cache_key: optional explicit key for caching
+        """
 
 
 _cached_adapter: Optional[BaseLLMAdapter] = None
