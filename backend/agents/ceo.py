@@ -26,40 +26,36 @@ class CEOAgent:
             f"Project description: {description}\n"
             f"Target platform: {target}\n"
             "\n"
-            "Your task: Break the project into logical, independent steps that can run in parallel.\n"
+            "STRICT RULE: Create EXACTLY 4-5 steps. Count them before responding.\n"
+            "Break the project into logical steps that run in parallel for speed.\n"
             "\n"
-            "Output a JSON object with the following structure:\n"
+            "Output JSON:\n"
             "{\n"
-            '  "_thought": "Explain your reasoning for the plan and parallelization strategy...",\n'
+            '  "_thought": "I will create 4 steps: scaffold (group A), implement core (group A parallel), add features (group B), finalize (sequential)...",\n'
             '  "steps": [\n'
             '    {\n'
-            '      "name": "string (e.g. \'scaffold_frontend\', \'setup_database\', \'implement_auth\')",\n'
+            '      "name": "scaffold_frontend",\n'
             '      "agent": "developer",\n'
-            '      "parallel_group": "string or null (steps with same group run in parallel)",\n'
+            '      "parallel_group": "setup",\n'
             '      "payload": {\n'
             '        "files": [\n'
-            '          {"path": "path/to/file", "content": "DETAILED INSTRUCTIONS for what this file should do and contain"}\n'
+            '          {"path": "index.html", "content": "Create main HTML with structure for: [description]. Include canvas/div for game, score display, controls."},\n'
+            '          {"path": "style.css", "content": "Modern styling with dark theme, centered layout, responsive design"}\n'
             '        ]\n'
             '      }\n'
-            '    }\n'
+            '    },\n'
+            '    {"name": "implement_logic", "parallel_group": "setup", "payload": {"files": [...]}},\n'
+            '    {"name": "add_features", "parallel_group": "features", "payload": {"files": [...]}},\n'
+            '    {"name": "finalize", "parallel_group": null, "payload": {"files": [...]}}\n'
             '  ]\n'
             "}\n"
             "\n"
-            "RULES:\n"
-            "1. MAXIMIZE PARALLELISM: Put independent tasks (frontend, backend, database) in the SAME 'parallel_group' (e.g., 'phase_1').\n"
-            "2. SEQUENTIAL DEPENDENCIES: If a task depends on another, use different parallel_group or null.\n"
-            "3. DETAILED SPECS: In 'payload.files[].content', write DETAILED natural language instructions.\n"
-            "   Example: 'Create a React component for user authentication with login form, validation, and error handling'\n"
-            "4. FILE GRANULARITY: Each step should create 2-5 files. Don't put everything in one step.\n"
-            "5. QUALITY OVER SPEED: It's better to have 3-5 well-defined steps than 1 vague step.\n"
-            "6. Return ONLY valid JSON. No markdown code blocks.\n"
-            "\n"
-            "EXAMPLE FOR WEB PROJECT:\n"
-            '[\n'
-            '  {"name": "scaffold_frontend", "parallel_group": "build", "payload": {"files": [...]}},\n'
-            '  {"name": "setup_backend", "parallel_group": "build", "payload": {"files": [...]}},\n'
-            '  {"name": "implement_auth", "parallel_group": "features", "payload": {"files": [...]}}\n'
-            ']\n'
+            "MANDATORY:\n"
+            "1. EXACTLY 4-5 steps (no more, no less - count before submitting)\n"
+            "2. Use parallel_group for independent tasks (setup, features)\n"
+            "3. Each step: 3-8 files with DETAILED instructions\n"
+            "4. ALWAYS include index.html in first step for web projects\n"
+            "5. Return ONLY JSON\n"
         )
         adapter = get_llm_adapter()
         try:
@@ -80,10 +76,19 @@ class CEOAgent:
             if isinstance(data, list): # Fallback if LLM returned list directly
                 steps = data
 
-            # Ensure IDs
+            # Ensure IDs and limit steps
             for step in steps:
                 if "id" not in step:
                     step["id"] = str(uuid4())
+            
+            # Enforce 4-5 step limit
+            if len(steps) > 5:
+                LOGGER.warning("CEO created %d steps, limiting to 5", len(steps))
+                steps = steps[:5]
+            elif len(steps) < 2:
+                LOGGER.warning("CEO created only %d steps, using fallback", len(steps))
+                return self._mock_plan(description, target)
+            
             return steps
         except Exception as exc:
             LOGGER.error("CEO plan generation failed: %s", exc)
@@ -102,30 +107,42 @@ class CEOAgent:
             }]
 
     def _mock_plan(self, description: str, target: str) -> List[Dict[str, Any]]:
-        """Balanced mock plan: quality + speed through parallelization."""
-        parallel_group = "build"
+        """4-step balanced plan: quality + speed through parallelization."""
         return [
             {
                 "id": str(uuid4()),
-                "name": "generate_frontend",
+                "name": "scaffold_frontend",
                 "agent": "developer",
-                "parallel_group": parallel_group,
+                "parallel_group": "setup",
                 "payload": {
                     "files": [
-                        {"path": "index.html", "content": f"Create frontend for: {description}. Target: {target}"},
-                        {"path": "style.css", "content": "Modern, responsive styling"},
+                        {"path": "index.html", "content": f"Create main HTML for {target} project: {description}. Include structure, canvas/divs for game, UI elements."},
+                        {"path": "style.css", "content": "Modern dark theme styling, centered layout, responsive design"},
+                        {"path": "script.js", "content": "Initialize game, setup event listeners, prepare scene"},
                     ]
                 },
             },
             {
                 "id": str(uuid4()),
-                "name": "generate_backend",
+                "name": "implement_core_logic",
                 "agent": "developer",
-                "parallel_group": parallel_group,  # Same group = parallel execution
+                "parallel_group": "setup",  # Parallel with scaffold
                 "payload": {
                     "files": [
-                        {"path": "main.py", "content": f"Backend logic for: {description}"},
-                        {"path": "requirements.txt", "content": "fastapi\nuvicorn\npydantic"},
+                        {"path": "game.js", "content": f"Core game logic for: {description}. Implement main game loop, state management, collision detection"},
+                        {"path": "models.js", "content": "Data models: Snake, Food, Score, Grid classes"},
+                    ]
+                },
+            },
+            {
+                "id": str(uuid4()),
+                "name": "add_features",
+                "agent": "developer",
+                "parallel_group": "features",  # After setup
+                "payload": {
+                    "files": [
+                        {"path": "features.js", "content": f"Additional features for {description}: animations, effects, sounds, controls"},
+                        {"path": "utils.js", "content": "Helper functions: random position, collision check, score calculation"},
                     ]
                 },
             },
@@ -133,11 +150,11 @@ class CEOAgent:
                 "id": str(uuid4()),
                 "name": "finalize",
                 "agent": "developer",
-                "parallel_group": None,  # Runs after build group
+                "parallel_group": None,  # Sequential
                 "payload": {
                     "files": [
-                        {"path": "README.md", "content": f"# {description}\n\nTarget: {target}\n\nHow to run: see docs"},
-                        {"path": "meta.json", "content": json.dumps({"description": description, "target": target}, indent=2)},
+                        {"path": "README.md", "content": f"# {description}\n\nTarget: {target}\n\nHow to run: Open index.html in browser"},
+                        {"path": "meta.json", "content": json.dumps({"description": description, "target": target, "version": "1.0"}, indent=2)},
                     ]
                 },
             },

@@ -18,13 +18,19 @@ def _limit_resources() -> None:
 
 async def start_web_server(project_path: Path) -> Dict[str, Any]:
     """Start a web server for HTML/JS projects. Returns process info."""
-    # Find entry point
+    # Find entry point - check common locations
     entry_points = [
         project_path / "index.html",
         project_path / "public" / "index.html",
         project_path / "dist" / "index.html",
         project_path / "src" / "index.html",
+        project_path / "build" / "index.html",
     ]
+    
+    # Also check for any index.html recursively
+    for html_file in project_path.rglob("index.html"):
+        if html_file not in entry_points:
+            entry_points.append(html_file)
     
     serve_dir = None
     for entry in entry_points:

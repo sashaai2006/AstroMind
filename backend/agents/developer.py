@@ -60,14 +60,8 @@ class DeveloperAgent:
         
         await self._broadcast_thought(project_id, f"Analyzing specs for step: {step_name}...")
         
-        # Simulate inter-agent communication for visualization
-        if on_message:
-            if "frontend" in step_name:
-                await on_message("generate_backend", "Requesting API schema...")
-            elif "backend" in step_name:
-                await on_message("generate_frontend", "API schema ready.")
-            else:
-                await on_message("ceo", "Reporting progress...")
+        # Removed inter-agent communication simulation for speed
+        # (was causing unnecessary WebSocket overhead)
 
         await self._broadcast_thought(project_id, "Generating code (fast mode)...")
 
